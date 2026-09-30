@@ -148,11 +148,11 @@
         <div class="instructions">
             <h3>📱 Telefonda Nasıl Açılır?</h3>
             <ol>
-                <li>Telefonlarınızın bilgisayar ile <strong>aynı Wi-Fi ağına</strong> bağlı olduğundan emin olun.</li>
+                <li>Telefonlarınızın bu bilgisayarla <strong>aynı Wi-Fi ağına</strong> bağlı olduğundan emin olun.</li>
                 <li>Eski telefonunuzun kamerasından soldaki <strong>Kamera QR kodunu</strong> okutun (veya telefon tarayıcısına <span id="cameraUrlText" class="url-tag">...</span> yazın).</li>
-                <li>Tarayıcınız <em>"Bağlantınız gizli değil / Güvenli değil"</em> uyarısı verirse: <strong>Gelişmiş</strong> butonuna ve ardından <strong>Siteye ilerle</strong> seçeneğine tıklayın. (Yerel SSL sertifikası içindir).</li>
+                <li>Tarayıcınız <em>"Bağlantınız gizli değil / Güvenli değil"</em> uyarısı verirse: <strong>Gelişmiş</strong> butonuna ve ardından <strong>Siteye ilerle</strong> seçeneğine tıklayın. (Yerel SSL sertifikası içindir, kameranın açılmasını sağlar).</li>
                 <li>Kamera iznini onaylayın.</li>
-                <li>Yeni telefonunuzdan da sağdaki <strong>İzleyici QR kodunu</strong> okutun. Canlı yayın anında başlayacaktır!</li>
+                <li>Yeni telefonunuzdan da sağdaki <strong>İzleyici QR kodunu</strong> okutun. Canlı yayın anında başlar!</li>
             </ol>
         </div>
     </div>
@@ -163,27 +163,19 @@
                 const res = await fetch('/api/info');
                 const info = await res.json();
                 
-                let externalBase;
-                if (info.isCloud || (window.location.hostname !== 'localhost' && !window.location.hostname.startsWith('192.') && !window.location.hostname.startsWith('10.') && !window.location.hostname.startsWith('172.'))) {
-                    // Bulut ortamında (Render vb.) veya genel alan adında: Port eklenmez
-                    externalBase = window.location.origin;
-                } else {
-                    // Yerel bilgisayarda yerel ağdan bağlanmak için:
-                    const proto = info.protocol || window.location.protocol.replace(':', '');
-                    const ip = info.ip || window.location.hostname;
-                    const port = info.port || window.location.port;
-                    externalBase = `${proto}://${ip}:${port}`;
-                }
+                const proto = info.protocol || 'https';
+                const ip = info.ip || window.location.hostname;
+                const port = info.port || window.location.port || '3000';
+                const externalBase = `${proto}://${ip}:${port}`;
 
                 const cameraUrl = `${externalBase}/camera.html`;
                 const viewerUrl = `${externalBase}/viewer.html`;
 
                 document.getElementById('cameraUrlText').innerText = cameraUrl;
-                // Butonlar her zaman geçerli sayfaya göre açılsın
                 document.getElementById('linkCamera').href = '/camera.html';
                 document.getElementById('linkViewer').href = '/viewer.html';
 
-                // Telefonla okutmak için QR kodları üret
+                // QR kodları üret
                 document.getElementById('qrCamera').src = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(cameraUrl)}`;
                 document.getElementById('qrViewer').src = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(viewerUrl)}`;
             } catch (e) {

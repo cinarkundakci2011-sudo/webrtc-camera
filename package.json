@@ -1,17 +1,21 @@
 {
-  "name": "webrtc",
+  "name": "webrtc-camera",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Eski telefonu güvenlik kamerasına dönüştüren WebRTC uygulaması",
+  "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js"
   },
-  "keywords": [],
+  "keywords": [
+    "webrtc",
+    "camera",
+    "security-camera",
+    "stream"
+  ],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
+    "selfsigned": "^2.4.1",
     "ws": "^8.22.0"
   }
 }
