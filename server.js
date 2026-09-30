@@ -28,6 +28,9 @@ const hasSsl = fs.existsSync(keyPath) && fs.existsSync(certPath);
 const requestHandler = (req, res) => {
     let reqUrl = req.url.split('?')[0];
 
+    // Tarayıcıların eski kodu önbelleğe alıp hataya sebep olmasını engelle
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
     // Cihaz ve IP bilgisi döndüren API
     if (reqUrl === '/api/info') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -39,7 +42,14 @@ const requestHandler = (req, res) => {
         }));
     }
 
-    let filePath = path.join(__dirname, reqUrl === '/' ? 'index.html' : reqUrl);
+    // Kolay rota eşlemeleri (/camera veya /camera.html, /viewer veya /viewer.html)
+    let fileName = reqUrl;
+    if (fileName === '/' || fileName === '') fileName = 'index.html';
+    else if (fileName === '/camera' || fileName === '/camera.html') fileName = 'camera.html';
+    else if (fileName === '/viewer' || fileName === '/viewer.html') fileName = 'viewer.html';
+    else fileName = fileName.replace(/^\//, '');
+
+    let filePath = path.join(__dirname, fileName);
     const extname = path.extname(filePath);
     let contentType = 'text/html; charset=utf-8';
     if (extname === '.js') contentType = 'text/javascript';
@@ -49,7 +59,7 @@ const requestHandler = (req, res) => {
     fs.readFile(filePath, (err, content) => {
         if (err) {
             res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-            res.end('404 - Sayfa Bulunamadı');
+            res.end('404 - Sayfa Bulunamadı: ' + reqUrl);
         } else {
             res.writeHead(200, { 'Content-Type': contentType });
             res.end(content);
