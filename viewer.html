@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yeni Telefon - İzleyici Modu</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            text-align: center; 
+            background: #111; 
+            color: white; 
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+        }
+        h1 { font-size: 22px; margin: 10px 0; }
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 650px;
+            margin: 15px 0;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(76, 175, 80, 0.3);
+            border: 2px solid #4caf50;
+        }
+        video { 
+            width: 100%; 
+            min-height: 240px;
+            display: block; 
+            background: #1a1a1a;
+            object-fit: contain;
+        }
+        .status { 
+            color: #81c784; 
+            font-size: 15px; 
+            margin: 10px 0;
+            padding: 8px 16px;
+            background: #1e1e1e;
+            border-radius: 8px;
+            display: inline-block;
+            max-width: 90%;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .btn {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .btn:hover { background: #444; }
+        .btn-green { background: #4caf50; border-color: #4caf50; }
+        .btn-audio { background: #2e7d32; border-color: #388e3c; }
+    </style>
+</head>
+<body>
+    <h1>📱 Canlı İzleme Ekranı</h1>
+    <div id="status" class="status">Kameraya bağlanılıyor...</div>
+
+    <div id="videoWrapper" class="video-container">
+        <!-- Tarayıcıların videoyu siyah ekranda dondurmaması için varsayılan olarak muted başlatıyoruz -->
+        <video id="remoteVideo" autoplay playsinline muted></video>
+    </div>
+
+    <div class="controls">
+        <button id="audioToggleBtn" class="btn btn-audio" onclick="toggleAudio()">🔊 Sesi Aç</button>
+        <button class="btn" onclick="toggleFullscreen()">⛶ Tam Ekran</button>
+        <button class="btn" onclick="reconnect()">🔄 Yeniden Bağlan</button>
+    </div>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const audioToggleBtn = document.getElementById('audioToggleBtn');
+        const videoWrapper = document.getElementById('videoWrapper');
+
+        let peerConnection;
+        let socket;
+        let pendingCandidates = [];
+
+        const rtcConfig = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                // Mobil 4G/5G ağlarında güvenli röle (TURN) sunucuları:
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
+            ]
+        };
+
+        function toggleAudio() {
+            remoteVideo.muted = !remoteVideo.muted;
+            if (remoteVideo.muted) {
+                audioToggleBtn.innerText = "🔊 Sesi Aç";
+                audioToggleBtn.classList.remove('btn-green');
+                audioToggleBtn.classList.add('btn-audio');
+            } else {
+                audioToggleBtn.innerText = "🔇 Sesi Kapat";
+                audioToggleBtn.classList.remove('btn-audio');
+                audioToggleBtn.classList.add('btn-green');
+            }
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                videoWrapper.requestFullscreen().catch(err => {
+                    alert("Tam ekran yapılamadı: " + err.message);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        function reconnect() {
+            statusDiv.innerText = "Yeniden bağlanılıyor...";
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'register_viewer' }));
+            } else {
+                connectWebSocket();
+            }
+        }
+
+        function initViewer() {
+            connectWebSocket();
+        }
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            socket = new WebSocket(`${protocol}//${host}`);
+
+            socket.onopen = () => {
+                statusDiv.innerText = "Sunucuya bağlanıldı! Kamera bekleniyor...";
+                socket.send(JSON.stringify({ type: 'register_viewer' }));
+            };
+
+            socket.onmessage = async (message) => {
+                const data = JSON.parse(message.data);
+
+                if (data.type === 'waiting_for_camera') {
+                    statusDiv.innerText = "⏳ Kamera henüz bağlı değil, bekleniyor...";
+                }
+                else if (data.type === 'offer') {
+                    statusDiv.innerText = "Kameradan yayın alındı, bağlanılıyor...";
+                    setupWebRTC(data.sdp);
+                } 
+                else if (data.type === 'ice_candidate') {
+                    if (peerConnection && peerConnection.remoteDescription) {
+                        peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(console.error);
+                    } else {
+                        pendingCandidates.push(data.candidate);
+                    }
+                }
+                else if (data.type === 'camera_disconnected') {
+                    statusDiv.innerText = "❌ Kamera bağlantısı koptu! Yeniden bağlanması bekleniyor...";
+                    remoteVideo.srcObject = null;
+                    if (peerConnection) {
+                        peerConnection.close();
+                        peerConnection = null;
+                    }
+                    pendingCandidates = [];
+                }
+            };
+
+            socket.onclose = () => {
+                statusDiv.innerText = "⚠️ Sunucu bağlantısı kesildi. 3 saniye sonra tekrar denenecek...";
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            socket.onerror = (err) => {
+                console.error("WebSocket hatası:", err);
+            };
+        }
+
+        async function setupWebRTC(cameraOfferSdp) {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            pendingCandidates = [];
+
+            peerConnection = new RTCPeerConnection(rtcConfig);
+
+            peerConnection.ontrack = (event) => {
+                console.log("📡 Görüntü parçası alındı:", event.track.kind);
+                if (event.streams && event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];
+                } else {
+                    if (!remoteVideo.srcObject) {
+                        remoteVideo.srcObject = new MediaStream();
+                    }
+                    remoteVideo.srcObject.addTrack(event.track);
+                }
+
+                remoteVideo.play().then(() => {
+                    statusDiv.innerText = "🟢 Canlı Yayın Aktif!";
+                }).catch(err => {
+                    console.warn("Otomatik oynatma hatası:", err);
+                    remoteVideo.muted = true;
+                    remoteVideo.play();
+                });
+            };
+
+            peerConnection.oniceconnectionstatechange = () => {
+                console.log("İzleyici ICE Durumu:", peerConnection.iceConnectionState);
+                if (peerConnection.iceConnectionState === 'connected' || peerConnection.iceConnectionState === 'completed') {
+                    statusDiv.innerText = "🟢 Canlı Yayın Aktif!";
+                } else if (peerConnection.iceConnectionState === 'failed') {
+                    statusDiv.innerText = "⚠️ Bağlantı kurulamadı. 'Yeniden Bağlan' butonuna basın.";
+                } else if (peerConnection.iceConnectionState === 'checking') {
+                    statusDiv.innerText = "⏳ Bağlantı kuruluyor...";
+                }
+            };
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate && socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ type: 'ice_candidate', candidate: event.candidate }));
+                }
+            };
+
+            try {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: cameraOfferSdp }));
+                
+                while (pendingCandidates.length > 0) {
+                    const candidate = pendingCandidates.shift();
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.error);
+                }
+
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }));
+                }
+            } catch (err) {
+                console.error("WebRTC bağlantı hatası:", err);
+                statusDiv.innerText = "Hata: WebRTC bağlantısı kurulamadı!";
+            }
+        }
+
+        window.onload = initViewer;
+    </script>
+</body>
+</html>

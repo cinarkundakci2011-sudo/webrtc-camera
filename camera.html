@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eski Telefon - Kamera Modu</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+            text-align: center; 
+            background: #121212; 
+            color: white; 
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+        }
+        h1 { font-size: 22px; margin: 10px 0; }
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin: 15px 0;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(229, 57, 53, 0.3);
+            border: 2px solid #e53935;
+        }
+        video { 
+            width: 100%; 
+            min-height: 240px;
+            display: block; 
+            background: #1a1a1a;
+            object-fit: cover;
+        }
+        .status { 
+            color: #ffb74d; 
+            font-size: 15px; 
+            margin: 10px 0;
+            padding: 8px 16px;
+            background: #1e1e1e;
+            border-radius: 8px;
+            display: inline-block;
+            max-width: 90%;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .btn {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .btn:hover { background: #444; }
+        .btn-active { background: #e53935; border-color: #e53935; }
+    </style>
+</head>
+<body>
+    <h1>🎥 Kamera İstasyonu</h1>
+    <div id="status" class="status">Kamera başlatılıyor...</div>
+
+    <div class="video-container">
+        <video id="localVideo" autoplay playsinline muted></video>
+    </div>
+
+    <div class="controls">
+        <button id="switchCamBtn" class="btn" onclick="toggleCamera()">🔄 Kamerayı Çevir</button>
+        <button id="muteBtn" class="btn" onclick="toggleMic()">🎙️ Mikrofon: Açık</button>
+    </div>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        const localVideo = document.getElementById('localVideo');
+        const muteBtn = document.getElementById('muteBtn');
+        
+        let localStream;
+        let peerConnection;
+        let socket;
+        let pendingCandidates = [];
+        let currentFacingMode = 'environment';
+        let isMicMuted = false;
+
+        const rtcConfig = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                // Mobil 4G/5G ağlarında güvenli röle (TURN) sunucuları:
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
+            ]
+        };
+
+        async function initCamera() {
+            try {
+                if (localStream) {
+                    localStream.getTracks().forEach(t => t.stop());
+                }
+
+                // Öncelikli olarak arka kamera ve ses ile aç
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { 
+                            facingMode: { ideal: currentFacingMode },
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        }, 
+                        audio: true 
+                    });
+                } catch (audioErr) {
+                    console.warn("Ses alınamadı, sadece video ile deneniyor:", audioErr);
+                    localStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: { ideal: currentFacingMode } }, 
+                        audio: false 
+                    });
+                }
+
+                localVideo.srcObject = localStream;
+                localVideo.play().catch(e => console.log("Yerel video oynatma:", e));
+                statusDiv.innerText = "Kamera devrede. Sinyal sunucusuna bağlanılıyor...";
+
+                // Eğer aktif bağlantı varsa yeni parçaları gönder
+                if (peerConnection) {
+                    createPeerConnectionAndSendOffer();
+                }
+
+                if (!socket || socket.readyState !== WebSocket.OPEN) {
+                    connectWebSocket();
+                }
+            } catch (e) {
+                statusDiv.innerText = "Hata: Kameraya erişilemedi! Lütfen tarayıcı izinlerini kontrol edin. (" + e.message + ")";
+                console.error("Kamera hatası:", e);
+            }
+        }
+
+        async function toggleCamera() {
+            currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+            statusDiv.innerText = "Kamera değiştiriliyor...";
+            await initCamera();
+            statusDiv.innerText = "Kamera değiştirildi (" + (currentFacingMode === 'environment' ? 'Arka' : 'Ön') + ")";
+        }
+
+        function toggleMic() {
+            if (!localStream) return;
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (audioTrack) {
+                isMicMuted = !isMicMuted;
+                audioTrack.enabled = !isMicMuted;
+                muteBtn.innerText = isMicMuted ? "🔇 Mikrofon: Kapalı" : "🎙️ Mikrofon: Açık";
+                muteBtn.classList.toggle('btn-active', isMicMuted);
+            }
+        }
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            socket = new WebSocket(`${protocol}//${host}`);
+
+            socket.onopen = () => {
+                statusDiv.innerText = "Sunucuya bağlanıldı! İzleyici bekleniyor...";
+                socket.send(JSON.stringify({ type: 'register_camera' }));
+            };
+
+            socket.onmessage = async (message) => {
+                const data = JSON.parse(message.data);
+
+                if (data.type === 'camera_ready') {
+                    statusDiv.innerText = "İzleyici bağlandı! WebRTC el sıkışması başlatılıyor...";
+                    createPeerConnectionAndSendOffer();
+                } 
+                else if (data.type === 'answer') {
+                    statusDiv.innerText = "🟢 İzleyiciye bağlanıldı!";
+                    if (peerConnection) {
+                        try {
+                            await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }));
+                            while (pendingCandidates.length > 0) {
+                                const candidate = pendingCandidates.shift();
+                                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.error);
+                            }
+                        } catch (err) {
+                            console.error("Answer setRemoteDescription hatası:", err);
+                        }
+                    }
+                } 
+                else if (data.type === 'ice_candidate') {
+                    if (peerConnection && peerConnection.remoteDescription) {
+                        peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(console.error);
+                    } else {
+                        pendingCandidates.push(data.candidate);
+                    }
+                }
+                else if (data.type === 'viewer_disconnected') {
+                    statusDiv.innerText = "İzleyici ayrıldı. Yeni izleyici bekleniyor...";
+                    if (peerConnection) {
+                        peerConnection.close();
+                        peerConnection = null;
+                    }
+                    pendingCandidates = [];
+                }
+            };
+
+            socket.onclose = () => {
+                statusDiv.innerText = "⚠️ Sunucu bağlantısı kesildi. 3 saniye sonra tekrar denenecek...";
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            socket.onerror = (err) => {
+                console.error("WebSocket hatası:", err);
+            };
+        }
+
+        async function createPeerConnectionAndSendOffer() {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            pendingCandidates = [];
+
+            peerConnection = new RTCPeerConnection(rtcConfig);
+            
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
+            }
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate && socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ type: 'ice_candidate', candidate: event.candidate }));
+                }
+            };
+
+            peerConnection.oniceconnectionstatechange = () => {
+                console.log("Kamera ICE Durumu:", peerConnection.iceConnectionState);
+                if (peerConnection.iceConnectionState === 'connected' || peerConnection.iceConnectionState === 'completed') {
+                    statusDiv.innerText = "🟢 Canlı yayın izleyiciye aktarılıyor!";
+                } else if (peerConnection.iceConnectionState === 'failed') {
+                    statusDiv.innerText = "⚠️ Bağlantı koptu, yeniden deneniyor...";
+                    createPeerConnectionAndSendOffer();
+                }
+            };
+
+            try {
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ type: 'offer', sdp: peerConnection.localDescription.sdp }));
+                }
+            } catch (err) {
+                console.error("Offer oluşturma hatası:", err);
+                statusDiv.innerText = "Hata: WebRTC teklifi oluşturulamadı!";
+            }
+        }
+
+        window.onload = initCamera;
+    </script>
+</body>
+</html>
