@@ -163,22 +163,33 @@
                 const res = await fetch('/api/info');
                 const info = await res.json();
                 
-                const proto = info.protocol || window.location.protocol.replace(':', '');
-                const ip = info.ip || window.location.hostname;
-                const port = info.port || window.location.port;
+                let externalBase;
+                if (info.isCloud || (window.location.hostname !== 'localhost' && !window.location.hostname.startsWith('192.') && !window.location.hostname.startsWith('10.') && !window.location.hostname.startsWith('172.'))) {
+                    // Bulut ortamında (Render vb.) veya genel alan adında: Port eklenmez
+                    externalBase = window.location.origin;
+                } else {
+                    // Yerel bilgisayarda yerel ağdan bağlanmak için:
+                    const proto = info.protocol || window.location.protocol.replace(':', '');
+                    const ip = info.ip || window.location.hostname;
+                    const port = info.port || window.location.port;
+                    externalBase = `${proto}://${ip}:${port}`;
+                }
 
-                const cameraUrl = `${proto}://${ip}:${port}/camera.html`;
-                const viewerUrl = `${proto}://${ip}:${port}/viewer.html`;
+                const cameraUrl = `${externalBase}/camera.html`;
+                const viewerUrl = `${externalBase}/viewer.html`;
 
                 document.getElementById('cameraUrlText').innerText = cameraUrl;
-                document.getElementById('linkCamera').href = cameraUrl;
-                document.getElementById('linkViewer').href = viewerUrl;
+                // Butonlar her zaman geçerli sayfaya göre açılsın
+                document.getElementById('linkCamera').href = '/camera.html';
+                document.getElementById('linkViewer').href = '/viewer.html';
 
-                // QR kodları üret
+                // Telefonla okutmak için QR kodları üret
                 document.getElementById('qrCamera').src = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(cameraUrl)}`;
                 document.getElementById('qrViewer').src = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(viewerUrl)}`;
             } catch (e) {
                 console.error("Bilgi alınamadı:", e);
+                document.getElementById('linkCamera').href = '/camera.html';
+                document.getElementById('linkViewer').href = '/viewer.html';
             }
         }
         loadInfo();
